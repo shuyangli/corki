@@ -1,14 +1,17 @@
 import os
 import logging
-from typing import Optional
-from fastapi import FastAPI, HTTPException
+
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, HTTPException, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from openai import OpenAIError
 from dotenv import load_dotenv
-from api.models import RecommendationRequest, HealthResponse
-from api.openai_client import OpenAIClient
-from api.image_processor import ImageProcessor
+from api.health_response import HealthResponse
+from internal.openai_client import OpenAIClient
+from internal.image_processor import ImageProcessor
+from server_state import ServerState
+from jinja2 import Environment, select_autoescape
 
 # Configure logging
 logging.basicConfig(
@@ -16,10 +19,35 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+jinja_env = Environment(autoescape=select_autoescape(["html", "xml"]))
+
+
+# Static prompt templates, loaded on server startup.
+SERVER_STATE = ServerState()
+
 # Load environment variables from .env file
 load_dotenv()
 
-app = FastAPI(title="AI Sommelier API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Load various static data on server startup.
+    with open("prompts/sommelier_system_prompt.txt", "r") as f:
+        SERVER_STATE.sommelier_system_prompt = f.read()
+    with open("prompts/sommelier_user_prompt_template.txt", "r") as f:
+        user_prompt_template = f.read()
+        SERVER_STATE.sommelier_user_prompt_template = jinja_env.from_string(
+            user_prompt_template
+        )
+    SERVER_STATE.openai_client = OpenAIClient(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        system_prompt=SERVER_STATE.sommelier_system_prompt,
+    )
+    SERVER_STATE.image_processor = ImageProcessor()
+    yield
+
+
+app = FastAPI(title="AI Sommelier API", lifespan=lifespan)
 
 # Configure CORS
 app.add_middleware(
@@ -30,32 +58,33 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize clients
-openai_client = OpenAIClient(api_key=os.getenv("OPENAI_API_KEY"))
-image_processor = ImageProcessor()
-
 
 @app.post("/api/recommend")
-async def recommend_wine(request: RecommendationRequest):
+async def recommend_wine(
+    prompt: str = Form(...),
+    images: list[UploadFile] = File(None),
+):
     """Endpoint to get wine recommendations based on prompt and optional menu images."""
     try:
         # Extract menu text if images were provided
         menu_text = None
-        if request.images and len(request.images) > 0:
+        if images:
             try:
-                menu_text = image_processor.extract_text_from_image(request.images[0])
+                image_processor = SERVER_STATE.image_processor
+                menu_text = await image_processor.extract_text_from_image(images[0])
             except Exception as e:
                 logger.error(f"Image processing error: {str(e)}", exc_info=True)
                 raise HTTPException(
                     status_code=400, detail=f"Failed to process image: {str(e)}"
                 )
 
-        system_prompt, user_content = openai_client.create_sommelier_prompt(
-            request.prompt, menu_text
+        user_prompt = SERVER_STATE.sommelier_user_prompt_template.render(
+            user_prompt=prompt, menu_text=menu_text
         )
 
+        openai_client = SERVER_STATE.openai_client
         return StreamingResponse(
-            openai_client.generate_streaming_response(system_prompt, user_content),
+            openai_client.generate_streaming_response(user_prompt),
             media_type="text/event-stream",
         )
     except OpenAIError as e:

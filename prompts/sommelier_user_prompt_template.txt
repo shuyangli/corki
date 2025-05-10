@@ -1,0 +1,4 @@
+{% if menu_text %}
+The restaurant's menu is: {{ menu_text }}
+{% endif %}
+The user's request is: {{ user_prompt }}
