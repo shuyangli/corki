@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from api.health_response import HealthResponse
 from internal.openai_client import OpenAIClient
 from internal.image_processor import ImageProcessor
-from server_state import ServerState
+from server_state import ServerState, Prompts
 from jinja2 import Environment, select_autoescape
 
 # Configure logging
@@ -32,18 +32,24 @@ load_dotenv()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Load various static data on server startup.
+    prompts = Prompts()
     with open("prompts/sommelier_system_prompt.txt", "r") as f:
-        SERVER_STATE.sommelier_system_prompt = f.read()
+        prompts.sommelier_system_prompt = f.read()
+    with open("prompts/image_processing_prompt.txt", "r") as f:
+        prompts.image_processing_prompt = f.read()
     with open("prompts/sommelier_user_prompt_template.txt", "r") as f:
         user_prompt_template = f.read()
-        SERVER_STATE.sommelier_user_prompt_template = jinja_env.from_string(
+        prompts.sommelier_user_prompt_template = jinja_env.from_string(
             user_prompt_template
         )
+
+    SERVER_STATE.prompts = prompts
     SERVER_STATE.openai_client = OpenAIClient(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        system_prompt=SERVER_STATE.sommelier_system_prompt,
+        system_prompt=SERVER_STATE.prompts.sommelier_system_prompt,
     )
-    SERVER_STATE.image_processor = ImageProcessor()
+    SERVER_STATE.image_processor = ImageProcessor(
+        image_processing_prompt=SERVER_STATE.prompts.image_processing_prompt
+    )
     yield
 
 
@@ -66,24 +72,26 @@ async def recommend_wine(
 ):
     """Endpoint to get wine recommendations based on prompt and optional menu images."""
     try:
-        base64_images = None
+        wine_list = None
         if images:
             try:
+                # Process images with Gemini first
                 image_processor = SERVER_STATE.image_processor
-                base64_images = await image_processor.encode_images_to_base64(images)
+                wine_list = await image_processor.extract_wine_list_from_images(images)
+
             except Exception as e:
                 logger.error(f"Image processing error: {str(e)}", exc_info=True)
                 raise HTTPException(
                     status_code=400, detail=f"Failed to process image: {str(e)}"
                 )
 
-        user_prompt = SERVER_STATE.sommelier_user_prompt_template.render(
-            user_prompt=prompt
+        user_prompt = SERVER_STATE.prompts.sommelier_user_prompt_template.render(
+            wine_list=wine_list, user_prompt=prompt
         )
 
         openai_client = SERVER_STATE.openai_client
         return StreamingResponse(
-            openai_client.generate_streaming_response(user_prompt, base64_images),
+            openai_client.generate_streaming_response(user_prompt),
             media_type="text/event-stream",
         )
     except OpenAIError as e:

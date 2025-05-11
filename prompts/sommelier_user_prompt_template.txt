@@ -1,3 +1,5 @@
-If provided, the images are wine lists where the user is choosing from.
+{% if wine_list %}
+Here is the wine list for the user to choose from: {{ wine_list }}
+{% endif %}
 
 The user's request is: {{ user_prompt }}
