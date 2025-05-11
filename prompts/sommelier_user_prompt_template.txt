@@ -1,4 +1,3 @@
-{% if menu_text %}
-The restaurant's menu is: {{ menu_text }}
-{% endif %}
+If provided, the images are wine lists where the user is choosing from.
+
 The user's request is: {{ user_prompt }}

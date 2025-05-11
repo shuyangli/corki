@@ -66,12 +66,11 @@ async def recommend_wine(
 ):
     """Endpoint to get wine recommendations based on prompt and optional menu images."""
     try:
-        # Extract menu text if images were provided
-        menu_text = None
+        base64_images = None
         if images:
             try:
                 image_processor = SERVER_STATE.image_processor
-                menu_text = await image_processor.extract_text_from_image(images[0])
+                base64_images = await image_processor.encode_images_to_base64(images)
             except Exception as e:
                 logger.error(f"Image processing error: {str(e)}", exc_info=True)
                 raise HTTPException(
@@ -79,12 +78,12 @@ async def recommend_wine(
                 )
 
         user_prompt = SERVER_STATE.sommelier_user_prompt_template.render(
-            user_prompt=prompt, menu_text=menu_text
+            user_prompt=prompt
         )
 
         openai_client = SERVER_STATE.openai_client
         return StreamingResponse(
-            openai_client.generate_streaming_response(user_prompt),
+            openai_client.generate_streaming_response(user_prompt, base64_images),
             media_type="text/event-stream",
         )
     except OpenAIError as e:
