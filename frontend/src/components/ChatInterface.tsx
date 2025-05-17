@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import MessageBubble from './MessageBubble';
 import ChatInput from './ChatInput';
-import type { Message } from '../types'; // Or define Message interface directly here
+import type { Message } from '../types';
+import { WineRecommendationAPI } from '../api/wineRecommendation';
+import log from 'loglevel';
 
 // Helper to generate unique IDs
 const generateId = (): string => `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -25,70 +27,71 @@ const ChatInterface: React.FC = () => {
         scrollToBottom();
     }, [messages]);
 
-    // Mock AI streaming function
-    const streamMockAiResponse = async (userMessageText: string, uploadedImageSources: string[] = []): Promise<void> => {
+    const streamAiResponse = async (userMessageText: string, uploadedFiles: File[] = []): Promise<void> => {
         setIsAiTyping(true);
         const aiMessageId = generateId();
-        let baseResponseText = "Okay, I'm looking into that for you. ";
-
-        if (uploadedImageSources.length > 0) {
-            baseResponseText += `I see you've uploaded ${uploadedImageSources.length} image(s). `;
-            if (userMessageText && userMessageText !== "File upload initiated") { // Check if there's actual user text beyond file indication
-                baseResponseText += `Regarding your query "${userMessageText}" and the menu... `;
-            } else if (uploadedImageSources.length > 0 && (!userMessageText || userMessageText === "File upload initiated")) {
-                baseResponseText += `Let's see what's on this menu... `;
-            }
-        } else if (userMessageText) {
-            baseResponseText += `Regarding "${userMessageText}"... `;
-        }
-
-        // Add initial AI message part
-        setMessages((prev) => [
-            ...prev,
-            { id: aiMessageId, text: "", sender: 'ai', isStreaming: true, images: [] }, // Ensure images is defined
-        ]);
-
-        const fullAiText = baseResponseText + "Let me suggest a wonderful pairing. For seafood, a crisp Sauvignon Blanc is often delightful. For a hearty steak, a Cabernet Sauvignon can be a great choice. If you shared a menu, I might point to the 'Coastal Pinot Grigio' or the 'Reserve Merlot'.";
         let currentText = "";
 
-        for (let i = 0; i < fullAiText.length; i++) {
-            await new Promise((resolve) => setTimeout(resolve, 30)); // Simulate typing delay
-            currentText += fullAiText[i];
+        // Add initial AI message
+        setMessages((prev) => [
+            ...prev,
+            { id: aiMessageId, text: "", sender: 'ai', isStreaming: true, images: [] },
+        ]);
+
+        try {
+            await WineRecommendationAPI.getRecommendation(
+                {
+                    prompt: userMessageText,
+                    images: uploadedFiles,
+                },
+                (response) => {
+                    if (response.done) {
+                        // Finalize AI message
+                        setMessages((prevMessages) =>
+                            prevMessages.map((msg) =>
+                                msg.id === aiMessageId ? { ...msg, text: currentText, isStreaming: false } : msg
+                            )
+                        );
+                        setIsAiTyping(false);
+                    } else {
+                        currentText += response.content;
+                        setMessages((prevMessages) =>
+                            prevMessages.map((msg) =>
+                                msg.id === aiMessageId ? { ...msg, text: currentText, isStreaming: true } : msg
+                            )
+                        );
+                    }
+                }
+            );
+        } catch (error) {
+            log.error('Error getting wine recommendation:', error);
+            // Add error message
             setMessages((prevMessages) =>
                 prevMessages.map((msg) =>
-                    msg.id === aiMessageId ? { ...msg, text: currentText, isStreaming: true } : msg
+                    msg.id === aiMessageId
+                        ? {
+                            ...msg,
+                            text: "I apologize, but I encountered an error while processing your request. Please try again.",
+                            isStreaming: false,
+                        }
+                        : msg
                 )
             );
+            setIsAiTyping(false);
         }
-
-        // Finalize AI message
-        setMessages((prevMessages) =>
-            prevMessages.map((msg) =>
-                msg.id === aiMessageId ? { ...msg, text: currentText, isStreaming: false } : msg
-            )
-        );
-        setIsAiTyping(false);
     };
 
     const handleSendMessage = async (text: string): Promise<void> => {
-        // This function is primarily for text messages.
-        // File uploads are handled by handleSendFiles and will also trigger an AI response.
-        // If text is empty but files were just uploaded, handleSendFiles will call the AI.
-        // If text is provided alongside a file upload (file input onChange triggers first),
-        // this function might be called with text afterwards.
-        // We only add a new user text message if there's actual text.
         if (text.trim()) {
             const userMessage: Message = {
                 id: generateId(),
                 text: text,
                 sender: 'user',
-                images: [] // Text messages don't have images by default
+                images: []
             };
             setMessages((prevMessages) => [...prevMessages, userMessage]);
-            await streamMockAiResponse(text); // AI responds to the text
+            await streamAiResponse(text);
         }
-        // If text is empty, we don't add a new message bubble here or call AI again,
-        // assuming handleSendFiles already did or will do.
     };
 
     const handleSendFiles = async (files: File[]): Promise<void> => {
@@ -114,12 +117,10 @@ const ChatInterface: React.FC = () => {
                     images: imageDataUrls,
                 };
                 setMessages((prevMessages) => [...prevMessages, userMessageWithImages]);
-                // Pass a generic text for file uploads if no specific user text for this action
-                await streamMockAiResponse("File upload initiated", imageDataUrls);
+                await streamAiResponse("File upload initiated", files);
             }
         } catch (error) {
-            console.error("Error reading files for preview:", error);
-            // Optionally, add an error message to the chat
+            log.error("Error reading files for preview:", error);
             const errorMessage: Message = {
                 id: generateId(),
                 text: "Sorry, there was an error processing your image(s). Please try again.",
