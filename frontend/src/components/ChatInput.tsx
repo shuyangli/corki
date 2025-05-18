@@ -1,6 +1,5 @@
 import React, { useState, useRef } from 'react';
 import { HiOutlinePaperAirplane, HiOutlinePaperClip } from 'react-icons/hi'
-import log from 'loglevel';
 
 interface ChatInputProps {
     onSendMessage: (text: string, images: File[]) => void;
