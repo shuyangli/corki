@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import MessageBubble from './MessageBubble';
 import ChatInput from './ChatInput';
-import type { Message } from '../types';
+import { type Message, MessageSender } from '../types';
 import { WineRecommendationAPI } from '../api/wineRecommendation';
 import log from 'loglevel';
 
@@ -13,7 +13,7 @@ const ChatInterface: React.FC = () => {
         {
             id: generateId(),
             text: "Hi there! How can I help you find the perfect wine today? Feel free to ask me anything or share a wine menu by tapping the 📎 icon.",
-            sender: 'ai',
+            sender: MessageSender.AI,
         },
     ]);
     const [isAiTyping, setIsAiTyping] = useState<boolean>(false);
@@ -35,7 +35,7 @@ const ChatInterface: React.FC = () => {
         // Add initial AI message
         setMessages((prev) => [
             ...prev,
-            { id: aiMessageId, text: "", sender: 'ai', isStreaming: true, images: [] },
+            { id: aiMessageId, text: "", sender: MessageSender.AI, isStreaming: true, images: [] },
         ]);
 
         try {
@@ -52,7 +52,6 @@ const ChatInterface: React.FC = () => {
                                 msg.id === aiMessageId ? { ...msg, text: currentText, isStreaming: false } : msg
                             )
                         );
-                        setIsAiTyping(false);
                     } else {
                         currentText += response.content;
                         setMessages((prevMessages) =>
@@ -77,57 +76,41 @@ const ChatInterface: React.FC = () => {
                         : msg
                 )
             );
+        } finally {
             setIsAiTyping(false);
         }
     };
 
-    const handleSendMessage = async (text: string): Promise<void> => {
+    const handleSendMessage = async (text: string, images: File[]): Promise<void> => {
+        // Convert images to data URLs
+        let imageDataUrls: string[] = [];
+        try {
+            const imageLoadingPromises = images.map(async (image) => {
+                if (image.type.startsWith('image/')) {
+                    return new Promise<string>((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onload = (e) => resolve(e.target?.result as string);
+                        reader.onerror = (e) => reject(e);
+                        reader.readAsDataURL(image);
+                    });
+                }
+                return Promise.resolve(undefined);
+            });
+            imageDataUrls = (await Promise.all(imageLoadingPromises)).filter((url) => url !== undefined);
+        } catch (error) {
+            log.error('Error converting images to data URLs:', error);
+            return;
+        }
+
         if (text.trim()) {
             const userMessage: Message = {
                 id: generateId(),
                 text: text,
-                sender: 'user',
-                images: []
+                sender: MessageSender.User,
+                images: imageDataUrls
             };
             setMessages((prevMessages) => [...prevMessages, userMessage]);
-            await streamAiResponse(text);
-        }
-    };
-
-    const handleSendFiles = async (files: File[]): Promise<void> => {
-        const imagePreviewsPromises: Promise<string>[] = [];
-        for (const file of files) {
-            if (file.type.startsWith('image/')) {
-                imagePreviewsPromises.push(new Promise((resolve, reject) => {
-                    const reader = new FileReader();
-                    reader.onload = (e) => resolve(e.target?.result as string);
-                    reader.onerror = (e) => reject(e);
-                    reader.readAsDataURL(file);
-                }));
-            }
-        }
-
-        try {
-            const imageDataUrls = await Promise.all(imagePreviewsPromises);
-            if (imageDataUrls.length > 0) {
-                const userMessageWithImages: Message = {
-                    id: generateId(),
-                    text: imageDataUrls.length === 1 ? "Uploaded 1 image." : `Uploaded ${imageDataUrls.length} images.`,
-                    sender: 'user',
-                    images: imageDataUrls,
-                };
-                setMessages((prevMessages) => [...prevMessages, userMessageWithImages]);
-                await streamAiResponse("File upload initiated", files);
-            }
-        } catch (error) {
-            log.error("Error reading files for preview:", error);
-            const errorMessage: Message = {
-                id: generateId(),
-                text: "Sorry, there was an error processing your image(s). Please try again.",
-                sender: 'ai',
-                isStreaming: false
-            };
-            setMessages((prev) => [...prev, errorMessage]);
+            await streamAiResponse(text, images);
         }
     };
 
@@ -141,8 +124,7 @@ const ChatInterface: React.FC = () => {
             </div>
             <ChatInput
                 onSendMessage={handleSendMessage}
-                onSendFiles={handleSendFiles}
-                isAiTyping={isAiTyping}
+                disableSend={isAiTyping}
             />
         </div>
     );

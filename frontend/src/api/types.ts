@@ -1,6 +1,6 @@
 export interface WineRecommendationRequest {
     prompt: string;
-    images?: File[];
+    images: File[];
 }
 
 export interface WineRecommendationResponse {

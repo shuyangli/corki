@@ -1,5 +1,5 @@
 import React from 'react';
-import type { Message } from '../types'; // Or define Message interface directly here
+import { type Message, MessageSender } from '../types'; // Or define Message interface directly here
 
 interface MessageBubbleProps {
     message: Message;
@@ -7,7 +7,7 @@ interface MessageBubbleProps {
 
 const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
     const { text, sender, images, isStreaming } = message;
-    const isUser = sender === 'user';
+    const isUser = sender === MessageSender.User;
 
     return (
         <div className={`flex mb-4 ${isUser ? 'justify-end' : 'justify-start'}`}>
@@ -29,7 +29,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
                         ))}
                     </div>
                 )}
-                <p className="whitespace-pre-wrap break-words">
+                <p className="whitespace-pre-wrap break-words text-left">
                     {text}
                     {isStreaming && <span className="inline-block w-1 h-4 bg-gray-400 animate-pulse ml-1"></span>}
                 </p>
