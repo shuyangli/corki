@@ -42,6 +42,11 @@ Your AI sommelier service that recommends wines based on food choices. This serv
    npm run dev
    ```
 
+## Deployment
+
+1. Backend: auto-deploys, configuration on render.com
+2. Frontend: `npm run build && firebase deploy`
+
 ## Auto-generated API Documentation
 
 FastAPI automatically generates API documentation at:
